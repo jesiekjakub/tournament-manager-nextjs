@@ -22,5 +22,5 @@ This system allows organizers to create and manage tournaments with automated se
 
 ## 🛠 Installation & Setup
 1. **Clone the repo:**
-   git clone [https://github.com/YOUR_USERNAME/tournament-manager-nextjs.git](https://github.com/YOUR_USERNAME/tournament-manager-nextjs.git)
+   git clone https://github.com/jesiekjakub/tournament-manager-nextjs.git <br>
    cd tournament-manager-nextjs
