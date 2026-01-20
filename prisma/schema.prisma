@@ -11,6 +11,102 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        String   @id @default(uuid()) // Maps to Supabase Auth ID
+  email     String   @unique // Used as login [cite: 8]
+  firstName String
+  lastName  String
+  profilePicture String
+  createdAt DateTime @default(now())
+  
+  // Relations
+  organizedTournaments Tournament[]  @relation("Organizer")
+  participations       Participant[]
+  
+  @@map("users")
+}
+
+model Tournament {
+  id              String   @id @default(uuid())
+  title           String
+  discipline      String   
+  locationName    String
+  locationLat     Float    // For Google Maps [cite: 14]
+  locationLng     Float    // For Google Maps [cite: 14]
+  date            DateTime // Must not be in the past [cite: 30]
+  deadline        DateTime // Application deadline [cite: 14]
+  maxParticipants Int      // Participant limit [cite: 14, 19]
+  sponsorLogos    String[] // Requirement 4 and 12 [cite: 14, 29]
+  
+  // Relation to the User who is the organizer [cite: 14, 15]
+  organizerId     String
+  organizer       User     @relation("Organizer", fields: [organizerId], references: [id])
+  
+  participants    Participant[]
+  matches         Match[]
+
+  status          TournamentStatus @default(OPEN)
+
+  @@map("tournaments")
+}
+
+model Participant {
+  id             String @id @default(uuid())
+  licenseNumber  String 
+  currentRanking Int    // Used for seeding in the ladder [cite: 20]
+  
+  userId         String
+  user           User   @relation(fields: [userId], references: [id])
+  
+  tournamentId   String
+  tournament     Tournament @relation(fields: [tournamentId], references: [id])
+
+  // Matches where this participant is player 1 or 2
+  matchesAsP1    Match[] @relation("Player1")
+  matchesAsP2    Match[] @relation("Player2")
+  matchesWon     Match[] @relation("Winner")
+
+  // License and ranking must be unique for the tournament [cite: 17]
+  @@unique([tournamentId, licenseNumber]) 
+  @@unique([tournamentId, currentRanking])
+  
+  // A user can only sign up once for a specific tournament
+  @@unique([userId, tournamentId]) 
+
+  @@map("participants")
+}
+
+model Match {
+  id            String   @id @default(uuid())
+  
+  tournamentId  String
+  tournament    Tournament @relation(fields: [tournamentId], references: [id])
+  
+  // Structured positioning for the ladder 
+  round         Int      // Round 1, Round 2 (Semis), etc.
+  position      Int      // Vertical position within the round
+  
+  // Participants - Nullable because a match waits for previous round winners
+  player1Id     String?
+  player1       Participant? @relation("Player1", fields: [player1Id], references: [id])
+  
+  player2Id     String?
+  player2       Participant? @relation("Player2", fields: [player2Id], references: [id])
+  
+  // Requirement 8: Conflict resolution logic [cite: 24, 25]
+  player1Result String?  // What Player 1 claims happened
+  player2Result String?  // What Player 2 claims happened
+  
+  winnerId      String?
+  winner        Participant? @relation("Winner", fields: [winnerId], references: [id])
+
+  @@map("matches")
+}
+
+enum TournamentStatus {
+  OPEN
+  LADDER_GENERATED // Set after the deadline passes [cite: 20]
+  COMPLETED
 }
