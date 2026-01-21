@@ -4,7 +4,7 @@ import { createClient } from '@/utils/supabase/server' // We will create this ut
 import { redirect } from 'next/navigation'
 
 export async function signup(formData: FormData) {
-  const supabase = createClient()
+  const supabase = await createClient()
 
   // Extract data from the form
   const email = formData.get('email') as string
