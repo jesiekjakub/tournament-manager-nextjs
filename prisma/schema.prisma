@@ -18,7 +18,7 @@ model User {
   email     String   @unique // Used as login [cite: 8]
   firstName String
   lastName  String
-  profilePicture String
+  profilePicture String?
   createdAt DateTime @default(now())
   
   // Relations
