@@ -1,10 +1,10 @@
 import { updatePassword } from './actions'
 
-export default function ResetPassword({
-  searchParams,
-}: {
-  searchParams: { message: string }
+export default async function ResetPassword(props: {
+  searchParams: Promise<{ message: string }>
 }) {
+  const searchParams = await props.searchParams
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
       <form className="w-full max-w-md space-y-6 rounded-lg bg-white p-8 shadow-md">
