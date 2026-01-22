@@ -5,8 +5,8 @@ import { redirect } from 'next/navigation'
 
 export async function updatePassword(formData: FormData) {
   const supabase = await createClient()
-  const password = formData.get('password') as string
-  const confirmPassword = formData.get('confirmPassword') as string
+  const password = (formData.get('password') as string).trim()
+  const confirmPassword = (formData.get('confirmPassword') as string).trim()
 
   if (password !== confirmPassword) {
     return redirect('/reset-password?message=Passwords do not match')
@@ -17,6 +17,7 @@ export async function updatePassword(formData: FormData) {
   })
 
   if (error) {
+    console.error("Supabase Password Update Error:", error.message)
     return redirect('/reset-password?message=Could not update password')
   }
 
