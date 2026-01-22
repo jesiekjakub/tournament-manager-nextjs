@@ -1,10 +1,9 @@
 'use server'
 
 import { createClient } from '@/utils/supabase/server'
-import { PrismaClient } from '@prisma/client' // Use a singleton in real app
+import { prisma } from '@/utils/db' 
 import { redirect } from 'next/navigation'
 
-const prisma = new PrismaClient()
 
 export async function createTournament(formData: FormData) {
   const supabase = await createClient()

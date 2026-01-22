@@ -5,8 +5,9 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: '50mb',
     },
+    proxyClientMaxBodySize: '50mb',
   },
-  // We also need to authorize image domains for the map details page later
+
   images: {
     remotePatterns: [
       {
