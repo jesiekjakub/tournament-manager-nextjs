@@ -30,56 +30,61 @@ export async function generateBracket(tournamentId: string) {
 }
 
 // --- ACTION 2: Apply for Tournament (User) ---
-export async function applyForTournament(tournamentId: string) {
+export async function applyForTournament(prevState: any, formData: FormData) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  // If not logged in, redirect to login page
   if (!user) return redirect('/login')
 
-  // Fetch user details
-  const dbUser = await prisma.user.findUnique({ where: { id: user.id } })
-  if (!dbUser) throw new Error("User profile not found")
+  const tournamentId = formData.get('tournamentId') as string
+  const licenseNumber = formData.get('licenseNumber') as string
+  const currentRanking = Number(formData.get('currentRanking'))
 
-  const tournament = await prisma.tournament.findUnique({
-    where: { id: tournamentId },
-    include: { participants: true }
-  })
-
-  if (!tournament) throw new Error("Tournament not found")
-
-  // Validation
-  if (tournament.participants.length >= tournament.maxParticipants) {
-    throw new Error("Tournament is full")
+  if (!tournamentId || !licenseNumber || !currentRanking) {
+    return { error: "All fields are required" }
   }
 
-  // Check if already applied
-  const existing = await prisma.participant.findUnique({
-    where: {
-      userId_tournamentId: {
-        userId: user.id,
-        tournamentId: tournamentId
+  try {
+    await prisma.$transaction(async (tx) => {
+      const tournament = await tx.tournament.findUnique({
+        where: { id: tournamentId },
+        include: { participants: true }
+      })
+
+      if (!tournament) throw new Error("Tournament not found")
+      if (tournament.status !== 'OPEN') throw new Error("Tournament is closed")
+      
+      if (new Date() > new Date(tournament.deadline)) {
+        throw new Error("Application deadline has passed") // [cite: 14]
       }
-    }
-  })
 
-  if (existing) {
-    return // Already registered, do nothing
+      if (tournament.participants.length >= tournament.maxParticipants) {
+        throw new Error("Tournament is full") // [cite: 19]
+      }
+
+      // Uniqueness checks 
+      const isRankTaken = tournament.participants.some(p => p.currentRanking === currentRanking)
+      if (isRankTaken) throw new Error(`Rank #${currentRanking} is already taken`)
+
+      const isLicenseTaken = tournament.participants.some(p => p.licenseNumber === licenseNumber)
+      if (isLicenseTaken) throw new Error(`License ${licenseNumber} is already registered`)
+      
+      const isUserRegistered = tournament.participants.some(p => p.userId === user.id)
+      if (isUserRegistered) throw new Error("You are already registered")
+
+      await tx.participant.create({
+        data: {
+          userId: user.id,
+          tournamentId,
+          licenseNumber,
+          currentRanking
+        }
+      })
+    })
+  } catch (error: any) {
+    return { error: error.message || "Failed to join tournament" }
   }
-
-  // Create Participant with Mock Data for Demo
-  // (In a real app, you might ask for license number in a form)
-  const mockRank = Math.floor(Math.random() * 100) + 1
-  const mockLicense = `LIC-${Date.now().toString().slice(-4)}`
-
-  await prisma.participant.create({
-    data: {
-      userId: user.id,
-      tournamentId: tournamentId,
-      currentRanking: mockRank,
-      licenseNumber: mockLicense
-    }
-  })
 
   revalidatePath(`/tournaments/${tournamentId}`)
+  redirect(`/tournaments/${tournamentId}`)
 }

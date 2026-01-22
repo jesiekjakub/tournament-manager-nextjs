@@ -124,26 +124,20 @@ export default async function TournamentDetailsPage({ params }: PageProps) {
              )
           )}
           
-          {/* USER ACTIONS (Apply Button) */}
-          {/* We hide this for the organizer if the deadline is passed to avoid clutter, 
-              or keep it if you want them to be able to apply. */}
+          {/* APPLY BUTTON (User - Conditional) */}
           {isOpen && !canGenerateLadder && (
             canApply ? (
-              <form action={async () => {
-                  'use server'
-                  await applyForTournament(id)
-              }}>
-                <button className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition shadow-md font-medium">
-                  Apply Now
-                </button>
-              </form>
+              // LINK TO THE NEW APPLY PAGE
+              <Link 
+                href={`/tournaments/${id}/apply`}
+                className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition shadow-md font-medium inline-block"
+              >
+                Apply Now
+              </Link>
             ) : (
-               // Only show "Deadline Passed" to non-organizers OR if we didn't show the specific warning above
-               (!isOrganizer || currentParticipantsCount >= 2) && (
-                 <button disabled className="px-6 py-2 bg-gray-300 text-gray-500 rounded cursor-not-allowed border border-gray-400">
-                   {isFull ? 'Tournament Full' : 'Deadline Passed'}
-                 </button>
-               )
+               <button disabled className="px-6 py-2 bg-gray-300 text-gray-500 rounded cursor-not-allowed border border-gray-400">
+                 {isFull ? 'Tournament Full' : 'Deadline Passed'}
+               </button>
             )
           )}
         </div>
