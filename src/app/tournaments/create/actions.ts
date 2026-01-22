@@ -1,9 +1,9 @@
 'use server'
 
+import { TournamentStatus } from '@prisma/client'
 import { createClient } from '@/utils/supabase/server'
 import { prisma } from '@/utils/db' 
 import { redirect } from 'next/navigation'
-
 
 export async function createTournament(formData: FormData) {
   const supabase = await createClient()
@@ -17,40 +17,55 @@ export async function createTournament(formData: FormData) {
   const discipline = formData.get('discipline') as string
   const dateStr = formData.get('date') as string
   const locationName = formData.get('locationName') as string
-  const maxParticipants = parseInt(formData.get('maxParticipants') as string)
-  const lat = parseFloat(formData.get('lat') as string)
-  const lng = parseFloat(formData.get('lng') as string)
+  // Ensure we handle the number conversion safely
+  const maxParticipants = Number(formData.get('maxParticipants'))
+  const lat = Number(formData.get('lat'))
+  const lng = Number(formData.get('lng'))
   const deadlineStr = formData.get('deadline') as string
   const logoFiles = formData.getAll('logos') as File[]
+
+  console.log(`DEBUG: Found ${logoFiles.length} files to upload.`) // <--- DEBUG LOG
 
   const tournamentDate = new Date(dateStr)
   const deadlineDate = new Date(deadlineStr)
 
-  // 3. Validation (Requirement 30)
+  // 3. Validation
   if (tournamentDate < new Date()) {
     return redirect('/tournaments/create?error=Tournament date cannot be in the past')
   }
 
-  // 4. Image Upload (Requirement 6)
+  // 4. Image Upload (With Error Logging)
   const logoUrls: string[] = []
   
   for (const file of logoFiles) {
-    if (file.size > 0) {
-      const fileName = `${Date.now()}-${file.name}`
+    // Check if it's actually a file (Next.js sometimes sends an empty object if no file selected)
+    if (file.size > 0 && file.name !== 'undefined') {
+      const fileName = `${Date.now()}-${file.name.replace(/\s/g, '_')}` // specific sanitization
+      
+      console.log(`DEBUG: Uploading ${fileName}...`)
+
       const { data, error } = await supabase.storage
         .from('sponsor-logos')
-        .upload(fileName, file)
+        .upload(fileName, file, {
+          upsert: false,
+        })
       
-      if (data) {
-        const { data: { publicUrl } } = supabase.storage
+      if (error) {
+        console.error("DEBUG: Upload Error:", error) // <--- THIS WILL SHOW YOU THE REASON
+      } else if (data) {
+        const { data: publicData } = supabase.storage
           .from('sponsor-logos')
           .getPublicUrl(data.path)
-        logoUrls.push(publicUrl)
+        
+        console.log(`DEBUG: Upload Success: ${publicData.publicUrl}`)
+        logoUrls.push(publicData.publicUrl)
       }
     }
   }
 
   // 5. Database Insert
+  console.log("DEBUG: Saving to DB with Logos:", logoUrls)
+
   await prisma.tournament.create({
     data: {
       title,
@@ -61,8 +76,9 @@ export async function createTournament(formData: FormData) {
       locationLat: lat,
       locationLng: lng,
       maxParticipants,
-      sponsorLogos: logoUrls,
-      organizerId: user.id, // Requirement 12: User organizes their own tournament
+      sponsorLogos: logoUrls, // This should now contain the URLs
+      organizerId: user.id,
+      status: TournamentStatus.OPEN // Requirement 12 default
     },
   })
 
