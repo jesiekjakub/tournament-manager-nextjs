@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
 interface LocationPickerProps {
   onLocationSelect: (lat: number, lng: number) => void
@@ -8,14 +8,14 @@ interface LocationPickerProps {
 
 export default function LocationPicker({ onLocationSelect }: LocationPickerProps) {
   const mapRef = useRef<HTMLDivElement>(null)
-  const [marker, setMarker] = useState<google.maps.Marker | null>(null)
+  // use a ref instead of state to avoid closure staleness in event listeners
+  const markerRef = useRef<google.maps.Marker | null>(null)
 
   useEffect(() => {
     if (!mapRef.current) return
 
-    // Default view (e.g., Center of Warsaw)
     const map = new google.maps.Map(mapRef.current, {
-      center: { lat: 52.4066, lng: 16.9513 },
+      center: { lat: 52.4066, lng: 16.9513 }, 
       zoom: 10,
     })
 
@@ -24,19 +24,25 @@ export default function LocationPicker({ onLocationSelect }: LocationPickerProps
       const lng = e.latLng?.lng()
 
       if (lat && lng) {
-        // Remove old marker
-        if (marker) marker.setMap(null)
+        // Remove the previous marker if it exists
+        if (markerRef.current) {
+          markerRef.current.setMap(null)
+        }
 
-        // Add new marker
+        // Create and set the new marker
         const newMarker = new google.maps.Marker({
           position: { lat, lng },
           map: map,
         })
-        setMarker(newMarker)
+        
+        // Update our reference so we can delete it next click
+        markerRef.current = newMarker
+        
+        // Send coordinates to the parent form
         onLocationSelect(lat, lng)
       }
     })
-  }, []) // Run once on mount
+  }, [onLocationSelect])
 
   return <div ref={mapRef} className="w-full h-64 border rounded-md" />
 }
