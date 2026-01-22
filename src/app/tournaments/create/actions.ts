@@ -34,6 +34,16 @@ export async function createTournament(formData: FormData) {
     return redirect('/tournaments/create?error=Tournament date cannot be in the past')
   }
 
+  if (deadlineDate < new Date()) {
+    return redirect('/tournaments/create?error=Deadline date cannot be in the past')
+  }
+
+  const FIFTEEN_MINUTES = 15 * 60 * 1000 // 15 mins * 60 sec * 1000 ms
+  // If Deadline is greater (later) than (Start Time - 15 mins), throw error
+  if (deadlineDate.getTime() > (tournamentDate.getTime() - FIFTEEN_MINUTES)) {
+    return redirect('/tournaments/create?error=Application deadline must be at least 15 minutes before the tournament starts.')
+  }
+
   // 4. Image Upload (With Error Logging)
   const logoUrls: string[] = []
   
