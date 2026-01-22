@@ -4,7 +4,8 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import SponsorCarousel from '@/components/SponsorCarousel'
 import TournamentMap from '@/components/TournamentMap'
-import TournamentBracket from '@/components/TournamentBracket' // <--- IMPORT THIS
+import TournamentBracket from '@/components/TournamentBracket'
+import { generateBracket, applyForTournament } from './actions' // <--- Imports Server Actions
 
 function isValidUUID(id: string) {
   const regex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -30,7 +31,7 @@ export default async function TournamentDetailsPage({ params }: PageProps) {
     include: {
       organizer: true,
       participants: {
-        include: { user: true } // Still useful for participant count/stats
+        include: { user: true }
       },
       // REQUIREMENT 10: Fetch matches for the bracket visualization
       matches: {
@@ -56,13 +57,21 @@ export default async function TournamentDetailsPage({ params }: PageProps) {
   // Time Logic
   const now = new Date()
   const deadline = new Date(tournament.deadline)
-  const isDeadlinePassed = now.getTime() > deadline.getTime()
+  // "Deadline Passed" includes the check: Is it physically past the time?
+  const isTimeUp = now.getTime() > deadline.getTime()
   
   const isFull = currentParticipantsCount >= tournament.maxParticipants
   const isOpen = tournament.status === 'OPEN'
   const isLadderOrFinished = tournament.status === 'LADDER_GENERATED' || tournament.status === 'COMPLETED'
   
-  const canApply = isOpen && !isFull && !isDeadlinePassed
+  // Can Apply? (Must be OPEN, not full, and before deadline)
+  const canApply = isOpen && !isFull && !isTimeUp
+
+  // Can Generate Ladder? (Organizer only, OPEN status, AND (Time is Up OR Full), AND enough players)
+  const canGenerateLadder = isOrganizer && 
+                            isOpen && 
+                            (isTimeUp || isFull) &&
+                            currentParticipantsCount >= 2
 
   return (
     <main className="min-h-screen p-8 max-w-7xl mx-auto">
@@ -83,6 +92,7 @@ export default async function TournamentDetailsPage({ params }: PageProps) {
 
         {/* BUTTONS */}
         <div className="flex gap-3">
+          {/* EDIT BUTTON (Organizer) */}
           {isOrganizer && (
             <Link
               href={`/tournaments/${id}/edit`}
@@ -91,18 +101,49 @@ export default async function TournamentDetailsPage({ params }: PageProps) {
               Edit Tournament
             </Link>
           )}
+
+          {/* ORGANIZER ACTIONS */}
+          {isOrganizer && isOpen && (
+             canGenerateLadder ? (
+               // OPTION 1: Ready to Generate
+               <form action={async () => {
+                 'use server'
+                 await generateBracket(id)
+               }}>
+                 <button className="px-6 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition shadow-md font-bold flex items-center gap-2">
+                   <span>⚙️</span> Generate Ladder
+                 </button>
+               </form>
+             ) : (
+               // OPTION 2: Deadline Passed but NOT enough players
+               (isTimeUp || isFull) && currentParticipantsCount < 2 && (
+                 <div className="px-4 py-2 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded text-sm flex items-center">
+                   ⚠ Minimum 2 players required to generate Ladder
+                 </div>
+               )
+             )
+          )}
           
-          {isOpen && (
+          {/* USER ACTIONS (Apply Button) */}
+          {/* We hide this for the organizer if the deadline is passed to avoid clutter, 
+              or keep it if you want them to be able to apply. */}
+          {isOpen && !canGenerateLadder && (
             canApply ? (
-              <form action={`/tournaments/${id}/apply`} method="POST">
+              <form action={async () => {
+                  'use server'
+                  await applyForTournament(id)
+              }}>
                 <button className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition shadow-md font-medium">
                   Apply Now
                 </button>
               </form>
             ) : (
-               <button disabled className="px-6 py-2 bg-gray-300 text-gray-500 rounded cursor-not-allowed border border-gray-400">
-                 {isFull ? 'Tournament Full' : 'Deadline Passed'}
-               </button>
+               // Only show "Deadline Passed" to non-organizers OR if we didn't show the specific warning above
+               (!isOrganizer || currentParticipantsCount >= 2) && (
+                 <button disabled className="px-6 py-2 bg-gray-300 text-gray-500 rounded cursor-not-allowed border border-gray-400">
+                   {isFull ? 'Tournament Full' : 'Deadline Passed'}
+                 </button>
+               )
             )
           )}
         </div>
@@ -130,7 +171,7 @@ export default async function TournamentDetailsPage({ params }: PageProps) {
              </div>
              <div>
                <h3 className="text-sm font-medium text-gray-500">Deadline</h3>
-               <p className={`font-medium ${isDeadlinePassed ? 'text-gray-500' : 'text-red-600'}`}>
+               <p className={`font-medium ${isTimeUp ? 'text-gray-500' : 'text-red-600'}`}>
                  {deadline.toLocaleString()}
                </p>
              </div>
@@ -146,11 +187,10 @@ export default async function TournamentDetailsPage({ params }: PageProps) {
           {isLadderOrFinished ? (
             <div className="space-y-4">
               <h3 className="text-2xl font-bold">🏆 Tournament Bracket</h3>
-              {/* This component handles the horizontal scroll for huge ladders */}
               <TournamentBracket matches={tournament.matches} />
             </div>
           ) : (
-            // If OPEN, just show the Map
+            // If OPEN, just show the Map primarily
             <div className="h-96 w-full bg-gray-200 rounded-lg overflow-hidden border shadow-sm relative">
               <TournamentMap 
                 lat={tournament.locationLat} 
@@ -159,7 +199,7 @@ export default async function TournamentDetailsPage({ params }: PageProps) {
             </div>
           )}
           
-          {/* If Bracket is shown, show map below it */}
+          {/* If Bracket is shown, show map below it as secondary info */}
           {isLadderOrFinished && (
              <div className="h-64 w-full bg-gray-200 rounded-lg overflow-hidden border shadow-sm relative mt-8">
                <TournamentMap 
