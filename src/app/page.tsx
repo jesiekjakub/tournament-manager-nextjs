@@ -1,36 +1,76 @@
 import { prisma } from '@/utils/db'
 import Link from 'next/link'
 import Image from 'next/image'
+import Search from '@/components/Search'
+import { Prisma } from '@prisma/client'
 
-// Revalidate page every 60 seconds (or 0 for real-time)
 export const revalidate = 0 
-
-// REQUIREMENT 3: "paging, 10 tournaments per page" 
 const ITEMS_PER_PAGE = 10
 
 interface HomeProps {
-  searchParams: Promise<{ page?: string }>
+  searchParams: Promise<{ 
+    page?: string 
+    query?: string
+    dateFrom?: string
+    dateTo?: string
+  }>
+}
+
+// Security Helper: Check if a date string is valid and safe for Prisma
+function isValidDate(dateString: string | undefined): boolean {
+  if (!dateString) return false
+  const date = new Date(dateString)
+  // Check if it matches roughly YYYY-MM-DD format to avoid overflow years like 20202
+  const isFormatValid = /^\d{4}-\d{2}-\d{2}$/.test(dateString)
+  return !isNaN(date.getTime()) && isFormatValid
 }
 
 export default async function Home({ searchParams }: HomeProps) {
-  // 1. Resolve search params
   const params = await searchParams
   const currentPage = Number(params.page) || 1
+  const query = params.query || ''
   
-  // 2. Calculate database offsets
+  // SAFE Date Parsing
+  const dateFrom = isValidDate(params.dateFrom) ? params.dateFrom : undefined
+  const dateTo = isValidDate(params.dateTo) ? params.dateTo : undefined
+
   const skip = (currentPage - 1) * ITEMS_PER_PAGE
 
-  // 3. Fetch Data & Total Count
+  // --- BUILD FILTERS ---
+  const whereClause: Prisma.TournamentWhereInput = {
+    title: {
+      contains: query,
+      mode: 'insensitive',
+    },
+  }
+
+  // Apply Date Range Filter ONLY if dates are valid
+  if (dateFrom || dateTo) {
+    whereClause.date = {}
+    
+    if (dateFrom) {
+      whereClause.date.gte = new Date(dateFrom)
+    }
+    
+    if (dateTo) {
+      // Set to end of the day (23:59:59) so strict equality works for that day
+      const endDate = new Date(dateTo)
+      endDate.setHours(23, 59, 59, 999)
+      whereClause.date.lte = endDate
+    }
+  }
+
+  // --- FETCH DATA ---
   const [tournaments, totalCount] = await Promise.all([
     prisma.tournament.findMany({
+      where: whereClause,
       orderBy: { date: 'asc' },
       take: ITEMS_PER_PAGE,
       skip: skip,
     }),
-    prisma.tournament.count(),
+    prisma.tournament.count({ where: whereClause }),
   ])
 
-  // 4. Calculate pagination limits
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE)
   const hasNextPage = currentPage < totalPages
   const hasPrevPage = currentPage > 1
@@ -47,7 +87,8 @@ export default async function Home({ searchParams }: HomeProps) {
         </Link>
       </div>
 
-      {/* Grid: 1 col (mobile), 2 cols (tablet), 3 cols (desktop) */}
+      <Search />
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {tournaments.map((t) => (
           <Link 
@@ -63,7 +104,6 @@ export default async function Home({ searchParams }: HomeProps) {
                 </span>
               </div>
               
-              {/* Display logo safely, supporting GIFs */}
               {t.sponsorLogos && t.sponsorLogos.length > 0 && (
                 <div className="relative w-15 h-15">
                    <Image 
@@ -71,7 +111,7 @@ export default async function Home({ searchParams }: HomeProps) {
                      alt="Sponsor" 
                      fill 
                      className="object-contain"
-                     unoptimized // Forces raw GIF loading
+                     unoptimized 
                    />
                 </div>
               )}
@@ -79,11 +119,9 @@ export default async function Home({ searchParams }: HomeProps) {
             
             <div className="text-gray-600 text-sm space-y-2">
               <p>📅 {new Date(t.date).toLocaleDateString()} at {new Date(t.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
-              
               <p className="text-red-600">
                 ⏳ Deadline: {new Date(t.deadline).toLocaleDateString()}
               </p>
-
               <p>📍 {t.locationName}</p>
               <p>👥 Max Players: {t.maxParticipants}</p>
             </div>
@@ -91,18 +129,21 @@ export default async function Home({ searchParams }: HomeProps) {
         ))}
 
         {tournaments.length === 0 && (
-          <p className="col-span-full text-center text-gray-500 mt-10">
-            No tournaments found. Be the first to host one!
-          </p>
+          <div className="col-span-full text-center py-10 bg-gray-50 rounded-lg border border-dashed">
+            <p className="text-gray-500 text-lg">No tournaments found.</p>
+            {(query || dateFrom || dateTo) && (
+               <p className="text-sm text-gray-400 mt-2">Try adjusting your filters.</p>
+            )}
+          </div>
         )}
       </div>
 
-      {/* --- PAGINATION CONTROLS --- */}
+      {/* PAGINATION */}
       {totalPages > 1 && (
         <div className="flex justify-center items-center gap-4 mt-12">
           {hasPrevPage ? (
             <Link 
-              href={`/?page=${currentPage - 1}`}
+              href={`/?page=${currentPage - 1}&query=${query}&dateFrom=${dateFrom || ''}&dateTo=${dateTo || ''}`}
               className="px-4 py-2 border rounded hover:bg-gray-100"
             >
               ← Previous
@@ -119,7 +160,7 @@ export default async function Home({ searchParams }: HomeProps) {
 
           {hasNextPage ? (
             <Link 
-              href={`/?page=${currentPage + 1}`}
+              href={`/?page=${currentPage + 1}&query=${query}&dateFrom=${dateFrom || ''}&dateTo=${dateTo || ''}`}
               className="px-4 py-2 border rounded hover:bg-gray-100"
             >
               Next →
