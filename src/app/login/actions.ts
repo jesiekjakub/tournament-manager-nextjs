@@ -1,22 +1,20 @@
 'use server'
 
-import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { type ActionState, fail, failFromZod } from '@/lib/forms'
+import { loginSchema } from '@/lib/validation'
 
-export async function login(formData: FormData) {
-  const supabase = await createClient()
-
-  const email = formData.get('email') as string
-  const password = formData.get('password') as string
-
-  const { error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
+export async function login(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = loginSchema.safeParse({
+    email: formData.get('email'),
+    password: formData.get('password'),
   })
+  if (!parsed.success) return failFromZod(parsed.error)
 
-  if (error) {
-    return redirect('/login?message=Could not authenticate user')
-  }
+  const supabase = await createClient()
+  const { error } = await supabase.auth.signInWithPassword(parsed.data)
+  if (error) return fail('Could not authenticate user')
 
-  return redirect('/')
+  redirect('/')
 }

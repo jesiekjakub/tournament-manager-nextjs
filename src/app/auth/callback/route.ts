@@ -1,5 +1,5 @@
-import { createClient } from '@/utils/supabase/server'
 import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
@@ -9,18 +9,16 @@ export async function GET(request: Request) {
   if (code) {
     const supabase = await createClient()
     const { error } = await supabase.auth.exchangeCodeForSession(code)
-    
+
     if (!error) {
-      // SUCCESS: The session cookie is set by exchangeCodeForSession.
-      // We explicitly verify the user exists before redirecting.
-      const { data: { user } } = await supabase.auth.getUser()
-      
-      if (user) {
-        return NextResponse.redirect(`${origin}${next}`)
-      }
+      // Re-check with getUser so a stale or hijacked code doesn't slip through —
+      // exchangeCodeForSession swallows some failure modes silently.
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (user) return NextResponse.redirect(`${origin}${next}`)
     }
   }
 
-  // If we get here, the code was invalid or expired
   return NextResponse.redirect(`${origin}/auth/auth-code-error`)
 }

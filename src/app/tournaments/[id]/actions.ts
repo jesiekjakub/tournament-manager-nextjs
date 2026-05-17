@@ -1,90 +1,101 @@
 'use server'
 
-import { prisma } from '@/utils/db'
-import { createClient } from '@/utils/supabase/server'
+import { Prisma } from '@prisma/client'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { generateBracketForTournament } from '@/utils/tournamentLogic'
+import { prisma } from '@/lib/prisma'
+import { createClient } from '@/lib/supabase/server'
+import { type ActionState, fail, failFromZod } from '@/lib/forms'
+import { applicationSchema, uuidSchema } from '@/lib/validation'
+import { generateBracketForTournament } from '@/lib/tournament/generate'
 
-// --- ACTION 1: Generate the Ladder (Organizer Only) ---
-export async function generateBracket(tournamentId: string) {
+export async function generateBracketAction(tournamentId: string): Promise<void> {
+  const parsedId = uuidSchema.safeParse(tournamentId)
+  if (!parsedId.success) throw new Error('Invalid tournament id')
+
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) throw new Error('Unauthorized')
 
-  if (!user) throw new Error("Unauthorized")
-
-  // 1. Verify Ownership
   const tournament = await prisma.tournament.findUnique({
-    where: { id: tournamentId }
+    where: { id: parsedId.data },
+    select: { organizerId: true },
   })
-
   if (!tournament || tournament.organizerId !== user.id) {
-    throw new Error("Only the organizer can generate the bracket")
+    throw new Error('Only the organizer can generate the bracket')
   }
 
-  // 2. Call Shared Logic (Same logic used by Cron Job)
-  await generateBracketForTournament(tournamentId)
-
-  // 3. Refresh Page
-  revalidatePath(`/tournaments/${tournamentId}`)
+  await generateBracketForTournament(parsedId.data)
+  revalidatePath(`/tournaments/${parsedId.data}`)
 }
 
-// --- ACTION 2: Apply for Tournament (User) ---
-export async function applyForTournament(prevState: any, formData: FormData) {
+export async function applyForTournament(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
 
-  if (!user) return redirect('/login')
+  const parsed = applicationSchema.safeParse({
+    tournamentId: formData.get('tournamentId'),
+    licenseNumber: formData.get('licenseNumber'),
+    currentRanking: formData.get('currentRanking'),
+  })
+  if (!parsed.success) return failFromZod(parsed.error)
 
-  const tournamentId = formData.get('tournamentId') as string
-  const licenseNumber = formData.get('licenseNumber') as string
-  const currentRanking = Number(formData.get('currentRanking'))
-
-  if (!tournamentId || !licenseNumber || !currentRanking) {
-    return { error: "All fields are required" }
-  }
+  const { tournamentId, licenseNumber, currentRanking } = parsed.data
 
   try {
     await prisma.$transaction(async (tx) => {
       const tournament = await tx.tournament.findUnique({
         where: { id: tournamentId },
-        include: { participants: true }
+        select: {
+          status: true,
+          deadline: true,
+          maxParticipants: true,
+          _count: { select: { participants: true } },
+        },
       })
 
-      if (!tournament) throw new Error("Tournament not found")
-      if (tournament.status !== 'OPEN') throw new Error("Tournament is closed")
-      
-      if (new Date() > new Date(tournament.deadline)) {
-        throw new Error("Application deadline has passed") // [cite: 14]
+      if (!tournament) throw new ApplyError('Tournament not found')
+      if (tournament.status !== 'OPEN') throw new ApplyError('Tournament is closed')
+      if (tournament.deadline.getTime() < Date.now()) {
+        throw new ApplyError('Application deadline has passed')
       }
-
-      if (tournament.participants.length >= tournament.maxParticipants) {
-        throw new Error("Tournament is full") // [cite: 19]
+      if (tournament._count.participants >= tournament.maxParticipants) {
+        throw new ApplyError('Tournament is full')
       }
-
-      // Uniqueness checks 
-      const isRankTaken = tournament.participants.some(p => p.currentRanking === currentRanking)
-      if (isRankTaken) throw new Error(`Rank #${currentRanking} is already taken`)
-
-      const isLicenseTaken = tournament.participants.some(p => p.licenseNumber === licenseNumber)
-      if (isLicenseTaken) throw new Error(`License ${licenseNumber} is already registered`)
-      
-      const isUserRegistered = tournament.participants.some(p => p.userId === user.id)
-      if (isUserRegistered) throw new Error("You are already registered")
 
       await tx.participant.create({
-        data: {
-          userId: user.id,
-          tournamentId,
-          licenseNumber,
-          currentRanking
-        }
+        data: { userId: user.id, tournamentId, licenseNumber, currentRanking },
       })
     })
-  } catch (error: any) {
-    return { error: error.message || "Failed to join tournament" }
+  } catch (e) {
+    if (e instanceof ApplyError) return fail(e.message)
+    // Unique-constraint races are caught here rather than via an in-memory
+    // pre-check; the DB schema enforces per-tournament uniqueness on rank,
+    // license, and userId, so this is the only authoritative answer.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      return fail(translateUniqueViolation(e))
+    }
+    return fail('Failed to join tournament')
   }
 
   revalidatePath(`/tournaments/${tournamentId}`)
   redirect(`/tournaments/${tournamentId}`)
+}
+
+class ApplyError extends Error {}
+
+function translateUniqueViolation(e: Prisma.PrismaClientKnownRequestError): string {
+  const target = (e.meta?.target ?? []) as string[]
+  if (target.includes('currentRanking')) return 'That ranking is already taken for this tournament'
+  if (target.includes('licenseNumber')) return 'That license number is already registered'
+  if (target.includes('userId')) return 'You are already registered for this tournament'
+  return 'Application conflict'
 }

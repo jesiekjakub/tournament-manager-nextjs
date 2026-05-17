@@ -1,34 +1,33 @@
 'use server'
 
-import { createClient } from '@/utils/supabase/server' // We will create this utility next
 import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { type ActionState, fail, failFromZod } from '@/lib/forms'
+import { signupSchema } from '@/lib/validation'
+import { getSiteURL } from '@/lib/url'
 
-export async function signup(formData: FormData) {
+export async function signup(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = signupSchema.safeParse({
+    email: formData.get('email'),
+    password: formData.get('password'),
+    firstName: formData.get('firstName'),
+    lastName: formData.get('lastName'),
+  })
+  if (!parsed.success) return failFromZod(parsed.error)
+
+  const { email, password, firstName, lastName } = parsed.data
   const supabase = await createClient()
-
-  // Extract data from the form
-  const email = formData.get('email') as string
-  const password = formData.get('password') as string
-  const firstName = formData.get('firstName') as string
-  const lastName = formData.get('lastName') as string
-
-  // Req 1: Register with metadata
+  // firstName/lastName arrive on the auth.users row via raw_user_meta_data and
+  // are mirrored into public.users by setup_trigger.sql.
   const { error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      data: {
-        firstName, // Passed to our SQL Trigger
-        lastName,
-      },
-      emailRedirectTo: 'http://localhost:3000/auth/callback', // Confirms account
+      data: { firstName, lastName },
+      emailRedirectTo: `${getSiteURL()}/auth/callback`,
     },
   })
+  if (error) return fail(error.message)
 
-  if (error) {
-    return { error: error.message }
-  }
-
-  // Redirect to a success page telling them to check email
-  redirect('/auth/check-email') 
+  redirect('/auth/check-email')
 }

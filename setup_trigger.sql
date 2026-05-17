@@ -1,22 +1,30 @@
--- 1. Create a function that runs when a user is created
-create or replace function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer set search_path = public
-as $$
-begin
-  insert into public.users (id, email, "firstName", "lastName")
-  values (
-    new.id, 
-    new.email, 
-    new.raw_user_meta_data ->> 'firstName', 
-    new.raw_user_meta_data ->> 'lastName'
+-- Mirrors freshly-confirmed auth.users rows into the public.users table so the
+-- app has a canonical record to attach tournaments and participants to.
+-- firstName / lastName arrive via `signUp({ options: { data } })` and are
+-- exposed under raw_user_meta_data.
+--
+-- Run once against the Supabase project (after `prisma db push`):
+--   psql "$DIRECT_URL" -f setup_trigger.sql
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.users (id, email, "firstName", "lastName")
+  VALUES (
+    NEW.id,
+    NEW.email,
+    NEW.raw_user_meta_data ->> 'firstName',
+    NEW.raw_user_meta_data ->> 'lastName'
   );
-  return new;
-end;
+  RETURN NEW;
+END;
 $$;
 
--- 2. Create the trigger that calls the function
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute procedure public.handle_new_user();
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();

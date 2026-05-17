@@ -1,35 +1,40 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@/utils/db'
-import { generateBracketForTournament } from '@/utils/tournamentLogic'
+import { prisma } from '@/lib/prisma'
+import { generateBracketForTournament } from '@/lib/tournament/generate'
 
+/**
+ * Vercel Cron hits this endpoint every 10 minutes and seeds brackets for any
+ * tournament whose deadline has passed. Idempotent: tournaments past OPEN are
+ * skipped by `generateBracketForTournament`.
+ */
 export async function GET(request: Request) {
-  // 1. Security Check (Prevent strangers from visiting this URL)
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const expected = process.env.CRON_SECRET
+  if (!expected) {
+    return new NextResponse('CRON_SECRET not configured', { status: 500 })
+  }
+  if (request.headers.get('authorization') !== `Bearer ${expected}`) {
     return new NextResponse('Unauthorized', { status: 401 })
   }
 
-  try {
-    // 2. Find tournaments that are OPEN + Deadline Passed
-    const tournaments = await prisma.tournament.findMany({
-      where: {
-        status: 'OPEN',
-        deadline: { lt: new Date() }, // Deadline is in the past
-        participants: { some: {} }     // Has at least 1 participant
-      },
-      select: { id: true } // We only need the ID
-    })
+  const candidates = await prisma.tournament.findMany({
+    where: {
+      status: 'OPEN',
+      deadline: { lt: new Date() },
+      participants: { some: {} },
+    },
+    select: { id: true },
+  })
 
-    // 3. Process them all
-    const results = []
-    for (const t of tournaments) {
-      await generateBracketForTournament(t.id)
-      results.push(t.id)
+  const generated: string[] = []
+  const failed: { id: string; error: string }[] = []
+  for (const { id } of candidates) {
+    try {
+      const created = await generateBracketForTournament(id)
+      if (created !== null) generated.push(id)
+    } catch (e) {
+      failed.push({ id, error: e instanceof Error ? e.message : 'unknown' })
     }
-
-    return NextResponse.json({ success: true, generated: results })
-  } catch (error) {
-    console.error(error)
-    return new NextResponse('Error', { status: 500 })
   }
+
+  return NextResponse.json({ generated, failed })
 }

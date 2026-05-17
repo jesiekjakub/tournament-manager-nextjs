@@ -1,12 +1,13 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// Prisma schema for the tournament-manager app.
+//
+// Connection notes:
+//   DATABASE_URL points at the pooled Supabase endpoint used by the running
+//   server (PgBouncer-friendly).
+//   DIRECT_URL is the direct Postgres connection used by `prisma migrate` and
+//   `prisma db push` — those operations don't work through the pooler.
 
 generator client {
   provider = "prisma-client-js"
-
 }
 
 datasource db {
@@ -16,99 +17,97 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid()) // Maps to Supabase Auth ID
-  email     String   @unique // Used as login [cite: 8]
-  firstName String
-  lastName  String
+  id             String   @id @default(uuid())
+  email          String   @unique
+  firstName      String
+  lastName       String
   profilePicture String?
-  createdAt DateTime @default(now())
-  
-  // Relations
+  createdAt      DateTime @default(now())
+
   organizedTournaments Tournament[]  @relation("Organizer")
   participations       Participant[]
-  
+
   @@map("users")
 }
 
 model Tournament {
-  id              String   @id @default(uuid())
+  id              String           @id @default(uuid())
   title           String
-  discipline      String   
+  discipline      String
   locationName    String
-  locationLat     Float    // For Google Maps [cite: 14]
-  locationLng     Float    // For Google Maps [cite: 14]
-  date            DateTime // Must not be in the past [cite: 30]
-  deadline        DateTime // Application deadline [cite: 14]
-  maxParticipants Int      // Participant limit [cite: 14, 19]
-  sponsorLogos    String[] // Requirement 4 and 12 [cite: 14, 29]
-  
-  // Relation to the User who is the organizer [cite: 14, 15]
-  organizerId     String
-  organizer       User     @relation("Organizer", fields: [organizerId], references: [id])
-  
-  participants    Participant[]
-  matches         Match[]
-
+  locationLat     Float
+  locationLng     Float
+  date            DateTime
+  deadline        DateTime
+  maxParticipants Int
+  sponsorLogos    String[]
   status          TournamentStatus @default(OPEN)
+
+  organizerId String
+  organizer   User   @relation("Organizer", fields: [organizerId], references: [id])
+
+  participants Participant[]
+  matches      Match[]
 
   @@map("tournaments")
 }
 
 model Participant {
   id             String @id @default(uuid())
-  licenseNumber  String 
-  currentRanking Int    // Used for seeding in the ladder [cite: 20]
-  
-  userId         String
-  user           User   @relation(fields: [userId], references: [id])
-  
-  tournamentId   String
-  tournament     Tournament @relation(fields: [tournamentId], references: [id])
+  licenseNumber  String
+  currentRanking Int
 
-  // Matches where this participant is player 1 or 2
-  matchesAsP1    Match[] @relation("Player1")
-  matchesAsP2    Match[] @relation("Player2")
-  matchesWon     Match[] @relation("Winner")
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
-  // License and ranking must be unique for the tournament [cite: 17]
-  @@unique([tournamentId, licenseNumber]) 
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id])
+
+  matchesAsP1 Match[] @relation("Player1")
+  matchesAsP2 Match[] @relation("Player2")
+  matchesWon  Match[] @relation("Winner")
+
+  // Each (license, ranking, user) is unique within a tournament. The DB is the
+  // authority — application code translates P2002 violations into user-facing
+  // messages instead of pre-checking.
+  @@unique([tournamentId, licenseNumber])
   @@unique([tournamentId, currentRanking])
-  
-  // A user can only sign up once for a specific tournament
-  @@unique([userId, tournamentId]) 
-
+  @@unique([userId, tournamentId])
   @@map("participants")
 }
 
 model Match {
-  id            String   @id @default(uuid())
-  
-  tournamentId  String
-  tournament    Tournament @relation(fields: [tournamentId], references: [id])
-  
-  // Structured positioning for the ladder 
-  round         Int      // Round 1, Round 2 (Semis), etc.
-  position      Int      // Vertical position within the round
-  
-  // Participants - Nullable because a match waits for previous round winners
-  player1Id     String?
-  player1       Participant? @relation("Player1", fields: [player1Id], references: [id])
-  
-  player2Id     String?
-  player2       Participant? @relation("Player2", fields: [player2Id], references: [id])
-  
-  // Requirement 8: Conflict resolution logic [cite: 24, 25]
-  player1Result String?  // What Player 1 claims happened
-  player2Result String?  // What Player 2 claims happened
-  
-  winnerId      String?
-  winner        Participant? @relation("Winner", fields: [winnerId], references: [id])
+  id String @id @default(uuid())
+
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id])
+
+  // (round, position) addresses the slot in the bracket tree. position is
+  // 1-indexed within the round. See src/lib/tournament/bracket.ts for the
+  // pairing convention.
+  round    Int
+  position Int
+
+  player1Id String?
+  player1   Participant? @relation("Player1", fields: [player1Id], references: [id])
+
+  player2Id String?
+  player2   Participant? @relation("Player2", fields: [player2Id], references: [id])
+
+  // player1Result / player2Result hold each player's *claim* about the winner.
+  // When both agree, winnerId is set; on conflict, both are cleared so the
+  // pair can re-vote (see lib/tournament/advance.ts).
+  player1Result String?
+  player2Result String?
+
+  winnerId String?
+  winner   Participant? @relation("Winner", fields: [winnerId], references: [id])
 
   @@map("matches")
 }
 
 enum TournamentStatus {
   OPEN
-  LADDER_GENERATED // Set after the deadline passes [cite: 20]
+  LADDER_GENERATED
   COMPLETED
 }

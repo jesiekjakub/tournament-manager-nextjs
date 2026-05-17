@@ -1,25 +1,23 @@
 'use server'
 
-import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { type ActionState, fail, failFromZod } from '@/lib/forms'
+import { resetPasswordSchema } from '@/lib/validation'
 
-export async function updatePassword(formData: FormData) {
-  const supabase = await createClient()
-  const password = (formData.get('password') as string).trim()
-  const confirmPassword = (formData.get('confirmPassword') as string).trim()
-
-  if (password !== confirmPassword) {
-    return redirect('/reset-password?message=Passwords do not match')
-  }
-
-  const { error } = await supabase.auth.updateUser({
-    password: password,
+export async function updatePassword(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = resetPasswordSchema.safeParse({
+    password: formData.get('password'),
+    confirmPassword: formData.get('confirmPassword'),
   })
+  if (!parsed.success) return failFromZod(parsed.error)
 
-  if (error) {
-    console.error("Supabase Password Update Error:", error.message)
-    return redirect('/reset-password?message=Could not update password')
-  }
+  const supabase = await createClient()
+  const { error } = await supabase.auth.updateUser({ password: parsed.data.password })
+  if (error) return fail('Could not update password')
 
-  return redirect('/login?message=Password updated successfully')
+  redirect('/login?message=Password%20updated%20successfully')
 }

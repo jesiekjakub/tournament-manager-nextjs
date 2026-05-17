@@ -1,20 +1,16 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Image from 'next/image'
+import { CAROUSEL_INTERVAL_MS } from '@/lib/constants'
 
 export default function SponsorCarousel({ logos }: { logos: string[] }) {
-  const [currentIndex, setCurrentIndex] = useState(0)
+  const [index, setIndex] = useState(0)
 
   useEffect(() => {
-    // Only set up the timer if we have more than one logo
     if (logos.length <= 1) return
-
-    const interval = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % logos.length)
-    }, 10000) // 10 seconds
-
-    return () => clearInterval(interval)
+    const id = setInterval(() => setIndex((prev) => (prev + 1) % logos.length), CAROUSEL_INTERVAL_MS)
+    return () => clearInterval(id)
   }, [logos.length])
 
   if (logos.length === 0) return null
@@ -23,22 +19,20 @@ export default function SponsorCarousel({ logos }: { logos: string[] }) {
     <div className="w-full h-48 bg-white rounded-lg shadow-sm border p-4 flex items-center justify-center relative overflow-hidden">
       <div className="relative w-full h-full">
         <Image
-          src={logos[currentIndex]}
-          alt={`Sponsor ${currentIndex + 1}`}
+          src={logos[index]}
+          alt={`Sponsor ${index + 1}`}
           fill
           className="object-contain transition-opacity duration-500"
-          unoptimized // Keeps GIFs animated
+          unoptimized
         />
       </div>
-      
-      {/* Optional: Simple indicator dots */}
       {logos.length > 1 && (
         <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-2">
-          {logos.map((_, idx) => (
-            <div 
-              key={idx}
+          {logos.map((_, i) => (
+            <div
+              key={i}
               className={`w-2 h-2 rounded-full transition-colors ${
-                idx === currentIndex ? 'bg-blue-600' : 'bg-gray-300'
+                i === index ? 'bg-blue-600' : 'bg-gray-300'
               }`}
             />
           ))}

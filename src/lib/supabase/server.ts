@@ -1,6 +1,12 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
+/**
+ * Supabase client for Server Components and Server Actions. Cookie writes are
+ * silently dropped when called from a Server Component context (where the
+ * cookies API is read-only) — that's expected; the middleware refreshes
+ * sessions on every request, so the missed write is recovered on next nav.
+ */
 export async function createClient() {
   const cookieStore = await cookies()
 
@@ -15,22 +21,18 @@ export async function createClient() {
         set(name: string, value: string, options: CookieOptions) {
           try {
             cookieStore.set({ name, value, ...options })
-          } catch (error) {
-            // The `set` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
+          } catch {
+            // Read-only context (Server Component) — see module docstring.
           }
         },
         remove(name: string, options: CookieOptions) {
           try {
             cookieStore.set({ name, value: '', ...options })
-          } catch (error) {
-            // The `delete` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
+          } catch {
+            // Read-only context — see module docstring.
           }
         },
       },
-    }
+    },
   )
 }
